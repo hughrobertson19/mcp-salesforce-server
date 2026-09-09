@@ -1,0 +1,140 @@
+# mcp-salesforce-server
+
+An [MCP](https://modelcontextprotocol.io) server for Salesforce Contacts where irreversible CRM writes get a verify-before-apply step, backed by a server-held "before" snapshot the client can't tamper with.
+
+## Why it's built this way
+
+Letting an AI agent write straight to a live CRM record is the kind of irreversible action that deserves a verification step rather than a single hopeful tool call. Two things go wrong with the naive design:
+
+1. **The agent's information goes stale.** It read a field a few minutes ago; someone else has since changed it in Salesforce. Writing blindly discards that person's edit with no trace.
+2. **There's no record of what changed.** A CRM write with no audit trail is hard to review, hard to debug, and hard to trust.
+
+So the write is split in two:
+
+- **`propose_update`** fetches the *current* live values for the fields being changed, computes a before/after diff, appends a dry-run entry to an append-only audit log, and stores the proposal server-side under a generated id. **It never writes to Salesforce.**
+- **`confirm_update`** takes only that proposal id — nothing else. The "before" snapshot stays server-side, so a caller cannot supply it, forge it, or quietly adjust it to make the check pass. The server re-fetches the live record, and only if every field still matches what the diff was computed against does the write actually happen. If anything changed in between, the whole confirm is rejected as **stale** and nothing is applied.
+
+That re-verification step is the point of the project. The implementation is [`src/guard.ts`](src/guard.ts); the tests that prove it are [`src/guard.test.ts`](src/guard.test.ts).
+
+## Tools
+
+| Tool | Reads/writes | What it does |
+|---|---|---|
+| `ping` | — | Smoke-test tool; returns `"pong"`. |
+| `list_contacts` | read | List Contacts, optionally filtered by a search term against Name/Email. |
+| `get_contact` | read | Fetch one Contact by Id. |
+| `propose_update` | read + dry-run log | Diff a proposed change against live values; never writes. |
+| `confirm_update` | write (guarded) | Apply a proposal, only if the record hasn't changed since. |
+
+Writable fields are deliberately limited to a small allowlist: `Email`, `Phone`, `Title`, `Department`.
+
+## Quickstart
+
+```bash
+npm install
+cp .env.example .env   # then fill in your Salesforce Connected App credentials
+npm run build
+npx @modelcontextprotocol/inspector node dist/index.js
+```
+
+The Inspector opens a UI for calling the tools against your org; `--cli --method tools/list` does the same non-interactively.
+
+### Salesforce setup
+
+1. Create a **Developer Edition org** at [developer.salesforce.com](https://developer.salesforce.com).
+2. In Setup → App Manager, create a **Connected App**: enable OAuth, and under its OAuth policies enable **Client Credentials Flow** with a **Run As** user configured (the flow acts as that user).
+3. Copy `.env.example` to `.env` and fill in the Consumer Key/Secret and your org's login URL. `.env` is gitignored and never committed.
+
+## Worked examples
+
+Both transcripts below are from real runs against a live Salesforce Developer Edition org, with the audit-log lines quoted verbatim from `data/audit-log.jsonl`.
+
+### The normal path: propose, then confirm
+
+```jsonc
+// propose_update({ contactId: "003bm00001qvbvhAAA", changes: { Title: "Test Update" } })
+{
+  "proposalId": "086812c3-c4cc-4101-a7ab-949a873b79f9",
+  "contactId": "003bm00001qvbvhAAA",
+  "fields": { "Title": { "before": "SVP, Operations", "after": "Test Update" } },
+  "expiresAt": "2026-09-09T20:33:06.222Z"
+}
+
+// confirm_update({ proposalId: "086812c3-c4cc-4101-a7ab-949a873b79f9" })
+{
+  "status": "applied",
+  "proposalId": "086812c3-c4cc-4101-a7ab-949a873b79f9",
+  "contactId": "003bm00001qvbvhAAA",
+  "fields": { "Title": { "before": "SVP, Operations", "after": "Test Update" } },
+  "appliedAt": "2026-09-09T20:20:19.526Z"
+}
+```
+
+The audit log captures both halves — the dry run and the write that followed it:
+
+```jsonl
+{"event":"proposed","timestamp":"2026-09-09T20:18:06.227Z","proposalId":"086812c3-c4cc-4101-a7ab-949a873b79f9","contactId":"003bm00001qvbvhAAA","fields":{"Title":{"before":"SVP, Operations","after":"Test Update"}}}
+{"event":"confirmed","timestamp":"2026-09-09T20:20:19.526Z","proposalId":"086812c3-c4cc-4101-a7ab-949a873b79f9","contactId":"003bm00001qvbvhAAA","fields":{"Title":{"before":"SVP, Operations","after":"Test Update"}},"appliedAt":"2026-09-09T20:20:19.526Z"}
+```
+
+### The blocked path: the record changed underneath the proposal
+
+Here a change to a different Contact was proposed, and then — to genuinely simulate a concurrent edit rather than stage one in code — the record's `Title` was edited **by hand in the Salesforce UI**, outside this tool entirely, before the confirm was issued.
+
+```jsonc
+// propose_update({ contactId: "003bm00001qvbvpAAA", changes: { Title: "Pending Change" } })
+{
+  "proposalId": "75bd1ff0-b223-48e0-9485-f82172c19307",
+  "contactId": "003bm00001qvbvpAAA",
+  "fields": { "Title": { "before": "CEO", "after": "Pending Change" } }
+}
+
+// ...Title edited directly in the Salesforce UI, from "CEO" to "Interim CEO"...
+
+// confirm_update({ proposalId: "75bd1ff0-b223-48e0-9485-f82172c19307" })
+{
+  "status": "rejected",
+  "reason": "stale",
+  "contactId": "003bm00001qvbvpAAA",
+  "fields": { "Title": { "proposedBefore": "CEO", "currentValue": "Interim CEO" } }
+}
+```
+
+```jsonl
+{"event":"proposed","timestamp":"2026-09-09T20:39:05.647Z","proposalId":"75bd1ff0-b223-48e0-9485-f82172c19307","contactId":"003bm00001qvbvpAAA","fields":{"Title":{"before":"CEO","after":"Pending Change"}}}
+{"event":"rejected_stale","timestamp":"2026-09-09T20:49:19.283Z","proposalId":"75bd1ff0-b223-48e0-9485-f82172c19307","contactId":"003bm00001qvbvpAAA","fields":{"Title":{"proposedBefore":"CEO","currentValue":"Interim CEO"}}}
+```
+
+Nothing was written to Salesforce here — on the stale path `patchContact` is never called, and the hand-made edit ("Interim CEO") survived untouched. Note the two timestamps: the confirm came about ten minutes after the proposal, comfortably inside the 15-minute TTL. This was rejected because the *value* changed, not because the proposal expired — those are separate rejection reasons (`stale` vs `expired`), and this is the first one.
+
+A proposal also can't be confirmed twice — it's consumed on first read — and a failed Salesforce write retries transient 5xx/network errors up to three times with backoff while failing fast on a 4xx. [`DECISIONS.md`](DECISIONS.md) covers the reasoning behind each of those.
+
+## Evidence, not assertions
+
+[`src/guard.test.ts`](src/guard.test.ts) is the proof the guard works, rather than a claim that it does. It covers a stale write being rejected, a confirm with no prior proposal being rejected, a correct before/after diff reaching the audit log, a clean confirm actually applying, a proposal not being confirmable twice, and the retry/fail-fast behavior on write failures.
+
+Tests that never fail prove nothing, so the guard was checked against deliberate breakage: with the stale-value comparison in `guard.ts` disabled, the suite was rerun and the stale-rejection test failed exactly as it should have, then the check was restored. That's what establishes the test is exercising the guard rather than just confirming the code runs.
+
+```bash
+npm test
+```
+
+## Design decisions
+
+Every non-obvious fork in this build — SDK version, transport, auth flow, object choice, proposal storage, audit log format, retry policy — is recorded in [`DECISIONS.md`](DECISIONS.md) in `Chose / Over / Because` form.
+
+## Project layout
+
+```
+src/
+  guard.ts             propose/confirm orchestration — the tested core
+  sfClient.ts          Salesforce REST client (auth, query, get, patch)
+  proposalStore.ts     file-backed, single-use proposal store
+  auditLog.ts          append-only JSON Lines audit log
+  tools/               one file per MCP tool
+  test-utils/          fake Salesforce client used by guard.test.ts
+```
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
