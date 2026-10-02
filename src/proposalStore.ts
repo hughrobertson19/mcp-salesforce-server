@@ -33,8 +33,18 @@ export function createFileProposalStore(
     return path.join(proposalsDir, `${id}.json`);
   }
 
+  // The id on consume comes straight from the MCP client, and it becomes a file name. Anything
+  // outside a plain id charset (e.g. `../audit-log`) can only be an attempt to reach a file that
+  // isn't a proposal, so it's treated as not found without touching the filesystem.
+  function isSafeId(id: string): boolean {
+    return /^[A-Za-z0-9-]{1,128}$/.test(id);
+  }
+
   return {
     async create(input) {
+      if (!isSafeId(input.id)) {
+        throw new Error(`Refusing to store a proposal under an unsafe id: ${JSON.stringify(input.id)}`);
+      }
       await mkdir(proposalsDir, { recursive: true });
       const createdAt = now();
       const expiresAt = new Date(createdAt.getTime() + ttlMinutes * 60_000);
@@ -48,6 +58,9 @@ export function createFileProposalStore(
     },
 
     async consume(id) {
+      if (!isSafeId(id)) {
+        return { status: 'not_found' };
+      }
       const file = filePathFor(id);
       let raw: string;
       try {

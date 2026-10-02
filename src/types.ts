@@ -1,26 +1,34 @@
-export const WRITABLE_CONTACT_FIELDS = ['Email', 'Phone', 'Title', 'Department'] as const;
+import type { SObjectName } from './objects.js';
 
-export type WritableContactField = (typeof WRITABLE_CONTACT_FIELDS)[number];
+/**
+ * A field value as Salesforce's REST API returns it: text, picklist and date fields arrive as
+ * strings (dates as YYYY-MM-DD), currency fields as JSON numbers, and an empty field as null.
+ */
+export type FieldValue = string | number | null;
 
-/** Before/after snapshot for a single field, string-typed since every writable Contact field here is a string field. */
+/** Before/after snapshot for a single field. `before` is the raw live value at propose time. */
 export interface FieldDiff {
-  before: string | null;
-  after: string;
+  before: FieldValue;
+  after: string | number;
 }
 
-export interface Contact {
+/** A record as returned by a fields-by-id fetch: always an Id, plus whichever fields were requested. */
+export type SalesforceRecord = { Id: string } & Record<string, FieldValue | undefined>;
+
+export type Contact = {
   Id: string;
   Name?: string;
   Email?: string | null;
   Phone?: string | null;
   Title?: string | null;
   Department?: string | null;
-}
+};
 
 export interface Proposal {
   id: string;
-  contactId: string;
-  fields: Partial<Record<WritableContactField, FieldDiff>>;
+  object: SObjectName;
+  recordId: string;
+  fields: Record<string, FieldDiff>;
   createdAt: string;
   expiresAt: string;
 }

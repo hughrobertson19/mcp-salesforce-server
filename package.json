@@ -1,7 +1,7 @@
 {
   "name": "mcp-salesforce-server",
   "version": "0.1.0",
-  "description": "A guarded MCP server for Salesforce Contacts: propose/confirm writes with server-side re-verification and an append-only audit log.",
+  "description": "A guarded MCP server for Salesforce Contacts, Accounts and Opportunities: propose/confirm writes with server-side re-verification and an append-only audit log.",
   "type": "module",
   "license": "MIT",
   "engines": {
