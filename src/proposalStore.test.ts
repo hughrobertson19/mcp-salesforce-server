@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -73,4 +73,13 @@ describe('createFileProposalStore', () => {
     }
   });
 
+  it('treats a path-like id as not_found without touching files outside the store', async () => {
+    const store = createFileProposalStore(dataDir, 15);
+    await writeFile(path.join(dataDir, 'outside.json'), '{}', 'utf8');
+
+    const result = await store.consume('../outside');
+
+    expect(result).toEqual({ status: 'not_found' });
+    await expect(readFile(path.join(dataDir, 'outside.json'), 'utf8')).resolves.toBe('{}');
+  });
 });
