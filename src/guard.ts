@@ -58,7 +58,7 @@ function resolveRecordId(object: SObjectName, input: ProposeUpdateInput): string
   }
   if (!hasIdPrefixFor(object, recordId)) {
     throw new ProposalValidationError(
-      `${recordId} is not a ${object} Id (${object} Ids start with ${OBJECTS[object].idPrefix}).`,
+      `${recordId} is not a valid ${object} Id (${object} Ids start with ${OBJECTS[object].idPrefix}).`,
     );
   }
   return recordId;
@@ -156,7 +156,7 @@ function validateStoredProposal(raw: unknown): { ok: true; proposal: ValidPropos
     return { ok: false, detail: `unknown object ${JSON.stringify(object)}` };
   }
   if (typeof recordId !== 'string' || !hasIdPrefixFor(object, recordId)) {
-    return { ok: false, detail: `record Id ${JSON.stringify(recordId)} is not a ${object} Id` };
+    return { ok: false, detail: `record Id ${JSON.stringify(recordId)} is not a valid ${object} Id` };
   }
   if (typeof stored.fields !== 'object' || stored.fields === null) {
     return { ok: false, detail: 'proposal has no fields' };

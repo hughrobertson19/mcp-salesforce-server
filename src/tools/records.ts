@@ -72,7 +72,7 @@ function registerGetTool(server: McpServer, sfClient: SalesforceClient, names: R
       const id = args[idParam] as string;
       if (!hasIdPrefixFor(object, id)) {
         return {
-          content: [text(`${id} is not a ${object} Id (${object} Ids start with ${spec.idPrefix}).`)],
+          content: [text(`${id} is not a valid ${object} Id (${object} Ids start with ${spec.idPrefix}).`)],
           isError: true,
         };
       }

@@ -201,7 +201,7 @@ describe('guard: wrong-object protection', () => {
 
     const attempt = proposeUpdate(deps, { object: 'Account', recordId: CONTACT_ID, changes: { Phone: '555-0999' } });
 
-    await expect(attempt).rejects.toThrow('is not a Account Id');
+    await expect(attempt).rejects.toThrow('is not a valid Account Id');
     expect(sfClient.getCalls.Account + sfClient.getCalls.Contact).toBe(0);
     expect(await proposalFiles(dataDir)).toEqual([]);
   });
