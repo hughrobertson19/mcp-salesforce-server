@@ -1,38 +1,53 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import * as path from 'node:path';
-import type { FieldDiff } from './types.js';
+import type { SObjectName } from './objects.js';
+import type { FieldDiff, FieldValue } from './types.js';
+
+/**
+ * Which record an event is about. Every event that concerns a record carries `object` and
+ * `recordId`; Contact events also keep the original `contactId` key (same value) so log lines
+ * written before multi-object support, and anything grepping for `contactId`, still read the same.
+ * A legacy line with `contactId` and no `object` is a Contact event.
+ */
+export interface RecordRef {
+  object: SObjectName;
+  recordId: string;
+  contactId?: string;
+}
+
+export type StaleFields = Record<string, { proposedBefore: FieldValue; currentValue: FieldValue }>;
 
 export type AuditEvent =
-  | { event: 'proposed'; timestamp: string; proposalId: string; contactId: string; fields: Record<string, FieldDiff> }
-  | {
+  | ({ event: 'proposed'; timestamp: string; proposalId: string; fields: Record<string, FieldDiff> } & RecordRef)
+  | ({
       event: 'confirmed';
       timestamp: string;
       proposalId: string;
-      contactId: string;
       fields: Record<string, FieldDiff>;
       appliedAt: string;
-    }
+    } & RecordRef)
+  | ({ event: 'rejected_stale'; timestamp: string; proposalId: string; fields: StaleFields } & RecordRef)
+  | { event: 'rejected_not_found'; timestamp: string; proposalId: string }
+  | ({ event: 'rejected_expired'; timestamp: string; proposalId: string } & RecordRef)
   | {
-      event: 'rejected_stale';
+      /** A stored proposal that fails re-validation at confirm time (unknown object, field outside the allowlist, Id from another object). */
+      event: 'rejected_invalid_proposal';
       timestamp: string;
       proposalId: string;
-      contactId: string;
-      fields: Record<string, { proposedBefore: string | null; currentValue: string | null }>;
+      detail: string;
     }
-  | { event: 'rejected_not_found'; timestamp: string; proposalId: string }
-  | { event: 'rejected_expired'; timestamp: string; proposalId: string; contactId: string }
-  | {
+  | ({
       event: 'write_failed';
       timestamp: string;
       proposalId: string;
-      contactId: string;
       fields: Record<string, FieldDiff>;
       /** 1 for a non-retryable (4xx) failure, up to 3 for an exhausted retryable one. */
       attempts: number;
-    };
+    } & RecordRef);
 
 export interface AuditLog {
   append(event: AuditEvent): Promise<void>;
+  /** Returns every line as written — including legacy Contact-only lines, which have `contactId` but no `object`/`recordId`. */
   readAll(): Promise<AuditEvent[]>;
 }
 

@@ -13,7 +13,7 @@ const CONTACT_ID = '003ABC';
 const noSleep: (ms: number) => Promise<void> = async () => {};
 
 function makeDeps(dataDir: string, initial: Record<string, Contact>, opts: { sleep?: (ms: number) => Promise<void> } = {}) {
-  const sfClient = createFakeSalesforceClient(initial);
+  const sfClient = createFakeSalesforceClient({ Contact: initial });
   const proposalStore = createFileProposalStore(dataDir, 15);
   const auditLog = createFileAuditLog(dataDir);
   const deps: GuardDeps = {
@@ -44,13 +44,15 @@ describe('guard: proposeUpdate / confirmUpdate', () => {
     const proposal = await proposeUpdate(deps, { contactId: CONTACT_ID, changes: { Email: 'b@example.com' } });
 
     // Simulate someone editing the record in Salesforce directly after the proposal was made.
-    sfClient.setField(CONTACT_ID, 'Email', 'c@example.com');
+    sfClient.setField('Contact', CONTACT_ID, 'Email', 'c@example.com');
 
     const result = await confirmUpdate(deps, proposal.proposalId);
 
     expect(result).toEqual({
       status: 'rejected',
       reason: 'stale',
+      object: 'Contact',
+      recordId: CONTACT_ID,
       contactId: CONTACT_ID,
       fields: { Email: { proposedBefore: 'a@example.com', currentValue: 'c@example.com' } },
     });
@@ -163,7 +165,7 @@ describe('guard: proposeUpdate / confirmUpdate', () => {
     const proposal = await proposeUpdate(deps, { contactId: CONTACT_ID, changes: { Email: 'b@example.com' } });
     const result = await confirmUpdate(deps, proposal.proposalId);
 
-    expect(result).toEqual({ status: 'rejected', reason: 'write_failed', contactId: CONTACT_ID });
+    expect(result).toEqual({ status: 'rejected', reason: 'write_failed', object: 'Contact', recordId: CONTACT_ID, contactId: CONTACT_ID });
     expect(sfClient.patchCallCount).toBe(3);
 
     const events = await auditLog.readAll();
@@ -189,7 +191,7 @@ describe('guard: proposeUpdate / confirmUpdate', () => {
     const proposal = await proposeUpdate(deps, { contactId: CONTACT_ID, changes: { Email: 'b@example.com' } });
     const result = await confirmUpdate(deps, proposal.proposalId);
 
-    expect(result).toEqual({ status: 'rejected', reason: 'write_failed', contactId: CONTACT_ID });
+    expect(result).toEqual({ status: 'rejected', reason: 'write_failed', object: 'Contact', recordId: CONTACT_ID, contactId: CONTACT_ID });
     expect(sfClient.patchCallCount).toBe(1);
 
     const events = await auditLog.readAll();

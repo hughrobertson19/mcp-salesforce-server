@@ -6,10 +6,11 @@ export function registerConfirmUpdateTool(server: McpServer, deps: GuardDeps): v
   server.registerTool(
     'confirm_update',
     {
-      title: 'Confirm Contact Update',
+      title: 'Confirm Record Update',
       description:
-        'Confirm and apply a previously proposed Contact update, identified only by its proposalId — the ' +
-        "'before' snapshot lives server-side, so the caller cannot supply or tamper with it. Re-fetches the " +
+        'Confirm and apply a previously proposed Contact, Account or Opportunity update, identified only by ' +
+        "its proposalId — the object, record Id and 'before' snapshot all live server-side, so the caller " +
+        'cannot supply or tamper with them. Re-fetches the ' +
         'live Salesforce values and re-verifies they still match what the proposal was computed against ' +
         'before writing anything; if the record changed since propose_update, the write is rejected as stale ' +
         'and nothing is applied.',

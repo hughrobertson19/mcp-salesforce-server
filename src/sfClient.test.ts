@@ -31,8 +31,8 @@ describe('createSalesforceClient', () => {
     });
 
     const client = makeClient(fetchImpl as unknown as typeof fetch);
-    await client.getContactFields('003ABC', ['Email']);
-    await client.getContactFields('003ABC', ['Email']);
+    await client.getRecordFields('Contact', '003ABC', ['Email']);
+    await client.getRecordFields('Contact', '003ABC', ['Email']);
 
     expect(authCalls).toBe(1);
   });
@@ -54,14 +54,14 @@ describe('createSalesforceClient', () => {
     });
 
     const client = makeClient(fetchImpl as unknown as typeof fetch);
-    const contact = await client.getContactFields('003ABC', ['Email']);
+    const contact = await client.getRecordFields('Contact', '003ABC', ['Email']);
 
     expect(contact.Email).toBe('a@example.com');
     expect(authCalls).toBe(2);
     expect(dataCalls).toBe(2);
   });
 
-  it('getContactFields hits the record-by-id endpoint with a fields query param', async () => {
+  it('getRecordFields hits the record-by-id endpoint with a fields query param', async () => {
     const requestedUrls: string[] = [];
     const fetchImpl = vi.fn(async (url: string | URL) => {
       const u = url.toString();
@@ -73,12 +73,33 @@ describe('createSalesforceClient', () => {
     });
 
     const client = makeClient(fetchImpl as unknown as typeof fetch);
-    await client.getContactFields('003ABC', ['Email', 'Phone']);
+    await client.getRecordFields('Contact', '003ABC', ['Email', 'Phone']);
 
     expect(requestedUrls).toEqual(['https://instance.example/services/data/v61.0/sobjects/Contact/003ABC?fields=Email,Phone']);
   });
 
-  it('patchContact sends a PATCH with a JSON body of the changed fields', async () => {
+  it('builds the sobject path from the object name for Account and Opportunity', async () => {
+    const requests: { url: string; method: string | undefined }[] = [];
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const u = url.toString();
+      if (u.endsWith('/services/oauth2/token')) {
+        return jsonResponse(200, { access_token: 'tok', instance_url: 'https://instance.example' });
+      }
+      requests.push({ url: u, method: init?.method });
+      return init?.method === 'PATCH' ? new Response(null, { status: 204 }) : jsonResponse(200, { Id: 'x' });
+    });
+
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await client.getRecordFields('Account', '001ABC', ['Website']);
+    await client.patchRecord('Opportunity', '006ABC', { Amount: 75000 });
+
+    expect(requests).toEqual([
+      { url: 'https://instance.example/services/data/v61.0/sobjects/Account/001ABC?fields=Website', method: undefined },
+      { url: 'https://instance.example/services/data/v61.0/sobjects/Opportunity/006ABC', method: 'PATCH' },
+    ]);
+  });
+
+  it('patchRecord sends a PATCH with a JSON body of the changed fields', async () => {
     let capturedInit: RequestInit | undefined;
     const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
       const u = url.toString();
@@ -90,7 +111,7 @@ describe('createSalesforceClient', () => {
     });
 
     const client = makeClient(fetchImpl as unknown as typeof fetch);
-    await client.patchContact('003ABC', { Email: 'new@example.com' });
+    await client.patchRecord('Contact', '003ABC', { Email: 'new@example.com' });
 
     expect(capturedInit?.method).toBe('PATCH');
     expect(capturedInit?.body).toBe(JSON.stringify({ Email: 'new@example.com' }));
@@ -107,8 +128,8 @@ describe('createSalesforceClient', () => {
 
     const client = makeClient(fetchImpl as unknown as typeof fetch);
 
-    await expect(client.getContactFields('003ABC', ['Email'])).rejects.toBeInstanceOf(SalesforceApiError);
-    await expect(client.getContactFields('003ABC', ['Email'])).rejects.toMatchObject({ status: undefined });
+    await expect(client.getRecordFields('Contact', '003ABC', ['Email'])).rejects.toBeInstanceOf(SalesforceApiError);
+    await expect(client.getRecordFields('Contact', '003ABC', ['Email'])).rejects.toMatchObject({ status: undefined });
   });
 
   it('wraps a non-2xx response in a SalesforceApiError carrying the status code', async () => {
@@ -122,6 +143,6 @@ describe('createSalesforceClient', () => {
 
     const client = makeClient(fetchImpl as unknown as typeof fetch);
 
-    await expect(client.getContactFields('003ABC', ['Email'])).rejects.toMatchObject({ status: 404 });
+    await expect(client.getRecordFields('Contact', '003ABC', ['Email'])).rejects.toMatchObject({ status: 404 });
   });
 });

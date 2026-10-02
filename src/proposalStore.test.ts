@@ -19,7 +19,8 @@ describe('createFileProposalStore', () => {
     const store = createFileProposalStore(dataDir, 15);
     const created = await store.create({
       id: 'p1',
-      contactId: '003ABC',
+      object: 'Contact',
+      recordId: '003ABC',
       fields: { Email: { before: 'old@example.com', after: 'new@example.com' } },
     });
 
@@ -39,7 +40,7 @@ describe('createFileProposalStore', () => {
 
   it('returns not_found on a second consume of the same id (single-use)', async () => {
     const store = createFileProposalStore(dataDir, 15);
-    await store.create({ id: 'p1', contactId: '003ABC', fields: {} });
+    await store.create({ id: 'p1', object: 'Contact', recordId: '003ABC', fields: {} });
 
     const first = await store.consume('p1');
     const second = await store.consume('p1');
@@ -52,11 +53,24 @@ describe('createFileProposalStore', () => {
     let clock = new Date('2026-01-01T00:00:00.000Z');
     const store = createFileProposalStore(dataDir, 15, () => clock);
 
-    await store.create({ id: 'p1', contactId: '003ABC', fields: {} });
+    await store.create({ id: 'p1', object: 'Contact', recordId: '003ABC', fields: {} });
 
     clock = new Date('2026-01-01T00:16:00.000Z'); // 16 minutes later, past the 15-minute TTL
     const result = await store.consume('p1');
 
     expect(result.status).toBe('expired');
   });
+
+  it('records the object type on every stored proposal', async () => {
+    const store = createFileProposalStore(dataDir, 15);
+    await store.create({ id: 'p1', object: 'Opportunity', recordId: '006ABC', fields: { Amount: { before: 50000, after: 75000 } } });
+
+    const result = await store.consume('p1');
+
+    expect(result.status).toBe('found');
+    if (result.status === 'found') {
+      expect(result.proposal).toMatchObject({ object: 'Opportunity', recordId: '006ABC' });
+    }
+  });
+
 });

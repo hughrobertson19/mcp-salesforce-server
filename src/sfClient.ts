@@ -1,4 +1,5 @@
-import type { Contact, WritableContactField } from './types.js';
+import type { SObjectName } from './objects.js';
+import type { SalesforceRecord } from './types.js';
 
 /**
  * Every SalesforceClient method throws this on failure. `status` is the HTTP status code for a
@@ -19,8 +20,8 @@ export class SalesforceApiError extends Error {
 /**
  * Escapes a value for safe interpolation into a SOQL `LIKE '%...%'` clause.
  * The only place free-text user input reaches a query string in this project
- * (list_contacts' search term) — getContactFields/patchContact only ever use
- * field names drawn from the fixed WRITABLE_CONTACT_FIELDS allowlist.
+ * (the list tools' search term) — getRecordFields/patchRecord only ever use object
+ * and field names drawn from the fixed OBJECTS config in objects.ts.
  */
 export function escapeSoqlLikeValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -28,8 +29,9 @@ export function escapeSoqlLikeValue(value: string): string {
 
 export interface SalesforceClient {
   query(soql: string): Promise<Record<string, unknown>[]>;
-  getContactFields(id: string, fields: readonly string[]): Promise<Contact>;
-  patchContact(id: string, fields: Partial<Record<WritableContactField, string>>): Promise<void>;
+  /** `object` is always one of the fixed OBJECTS keys, never free text from a caller. */
+  getRecordFields(object: SObjectName, id: string, fields: readonly string[]): Promise<SalesforceRecord>;
+  patchRecord(object: SObjectName, id: string, fields: Record<string, string | number>): Promise<void>;
 }
 
 export interface SalesforceClientOptions {
@@ -124,13 +126,13 @@ export function createSalesforceClient(opts: SalesforceClientOptions): Salesforc
       return data.records;
     },
 
-    async getContactFields(id, fields) {
-      const path = `/services/data/v${opts.apiVersion}/sobjects/Contact/${encodeURIComponent(id)}?fields=${fields.join(',')}`;
-      return authedRequest<Contact>(path);
+    async getRecordFields(object, id, fields) {
+      const path = `/services/data/v${opts.apiVersion}/sobjects/${object}/${encodeURIComponent(id)}?fields=${fields.join(',')}`;
+      return authedRequest<SalesforceRecord>(path);
     },
 
-    async patchContact(id, fields) {
-      const path = `/services/data/v${opts.apiVersion}/sobjects/Contact/${encodeURIComponent(id)}`;
+    async patchRecord(object, id, fields) {
+      const path = `/services/data/v${opts.apiVersion}/sobjects/${object}/${encodeURIComponent(id)}`;
       await authedRequest<void>(path, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
